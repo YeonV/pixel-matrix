@@ -5,12 +5,12 @@ import { Cast, PlayArrow, Stop } from '@mui/icons-material'
 import DropFile from './components/DropFile'
 
 function Content() {
-  const [fft, setFft] = useState(1024)
+  const [fft, setFft] = useState(256)
   const [size, setSize] = useState(64)
   const [ip, setIp] = useState('ws://192.168.10.50:81')
 
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([])
-  const [audioDevice, setAudioDevice] = useState<any>()
+  const [audioDevice, setAudioDevice] = useState<null | string>()
   const [videoDevice, setVideoDevice] = useState('screen')
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -24,11 +24,12 @@ function Content() {
   const vctx = vcanvas?.getContext('2d', { willReadFrequently: true })
   const video = videoRef.current
 
-  const audioData = useRef<any>(null)
+  const audioData = useRef<AnalyserNode | null>(null)
   const audioContext = useRef(new AudioContext())
-  const theGain = useRef<any>(null)
-  const theStream = useRef<any>(null)
-  const theAnalyzer = useRef<any>()
+  const theSource = useRef<MediaStreamAudioSourceNode | null>(null)
+  const theGain = useRef<AudioParam | null>(null)
+  const theStream = useRef<MediaStream | null>(null)
+  const theAnalyzer = useRef<AnalyserNode | null>()
 
   const connect = useCallback(() => {
     const ws = new WebSocket(ip)
@@ -46,23 +47,14 @@ function Content() {
     }
   }, [ip])
 
-  // const send = (val: any) => {
-  //   if (
-  //     socketRef.current &&
-  //     socketRef.current.readyState === WebSocket.OPEN &&
-  //     socketRef.current.bufferedAmount === 0
-  //   ) {
-  //     socketRef.current.send(val)
-  //   }
-  // }
   const checkAudio = (log = false) => {
-    if (theStream.current && audioContext.current) {
-      const source = audioContext.current.createMediaStreamSource(theStream.current)
+    if (theStream.current && audioContext.current && !audioData.current && !theSource.current) {
+      theSource.current = audioContext.current.createMediaStreamSource(theStream.current)
       theAnalyzer.current = audioContext.current.createAnalyser()
       theAnalyzer.current.fftSize = fft
       const gain = audioContext.current.createGain()
       theGain.current = gain.gain
-      source.connect(gain)
+      theSource.current.connect(gain)
       gain.connect(theAnalyzer.current)
       audioData.current = theAnalyzer.current
       if (log) console.log('audioData', audioData.current)
@@ -73,7 +65,7 @@ function Content() {
     const tempip = localStorage.getItem('ip') || 'ws://192.168.10.50:81'
     setIp(tempip)
 
-    let videoStream: MediaStream | null = null
+    
     const ad = await navigator.mediaDevices.enumerateDevices().then((devices) => {
       setAudioDevices(devices.filter((cd) => cd.kind === 'audioinput'))
       return audioDevice !== null && devices.find((d) => d.deviceId === audioDevice) ? audioDevice : null
@@ -83,14 +75,22 @@ function Content() {
       console.log('Audio Device:', ad)
       try {
         if (videoDevice === 'cam') {
-          videoStream = await navigator.mediaDevices.getUserMedia({
+          await navigator.mediaDevices.getUserMedia({
             audio: { deviceId: { exact: ad } },
             video: true,
+          }).then((stream) => {
+            console.log('stream cam ad', stream)
+            theStream.current = stream
+            return stream
           })
         } else {
-          videoStream = await navigator.mediaDevices.getDisplayMedia({
-            audio: { deviceId: { exact: ad } },
+          await navigator.mediaDevices.getDisplayMedia({
+            audio: true,
             video: true,
+          }).then((stream) => {
+            console.log('stream ad', stream)
+            theStream.current = stream
+            return stream
           })
         }
       } catch (err) {
@@ -99,14 +99,22 @@ function Content() {
     } else {
       try {
         if (videoDevice === 'cam') {
-          videoStream = await navigator.mediaDevices.getUserMedia({
+          await navigator.mediaDevices.getUserMedia({
             audio: true,
             video: true,
+          }).then((stream) => {
+            console.log('stream cam', stream)
+            theStream.current = stream
+            return stream
           })
         } else {
-          videoStream = await navigator.mediaDevices.getDisplayMedia({
+          await navigator.mediaDevices.getDisplayMedia({
             audio: true,
             video: true,
+          }).then((stream) => {
+            console.log('stream', stream)
+            theStream.current = stream
+            return stream
           })
         }
       } catch (err) {
@@ -121,8 +129,7 @@ function Content() {
       if (vcanvas && video) {
         vcanvas.width = video.videoWidth
         vcanvas.height = video.videoHeight
-        video.srcObject = videoStream
-        theStream.current = videoStream
+        video.srcObject = theStream.current
         video.play()
         video.requestVideoFrameCallback(videoCB)
       }
@@ -133,12 +140,11 @@ function Content() {
     if (video) {
       video.pause()
       video.srcObject = null
-      theStream.current.getTracks().forEach((track: any) => track.stop())
+      theStream.current?.getTracks().forEach((track: any) => track.stop())
     }
   }
 
   const convertCanvas = async (ctx: CanvasRenderingContext2D, xres: number, yres: number) => {
-    // const start = performance.now()
     const imgData = ctx.getImageData(0, 0, xres, yres)
     const pixels = imgData.data
     socketRef.current?.send(Uint8Array.of(0x00))
@@ -153,21 +159,13 @@ function Content() {
       }
       socketRef.current?.send(buff)
     }
-    // const end = performance.now()
-    // console.log(`Send payload time: ${end - start} ms`)
   }
 
   const videoCB = () => {
-    // const startT = performance.now()
     if (video && vctx && ctx && canvas) {
       const w = (video.videoWidth / video.videoHeight) * canvas.height
       vctx.drawImage(video, 0, 0)
       ctx.drawImage(video, (canvas.width - w) * 0.5, 0, w, canvas.height)
-      // ctx.font = '50px serif'
-      // ctx.strokeStyle = 'white'
-      // ctx.strokeText('Pixel-Matrix', 0, 150, 300)
-      // ctx.fillStyle = 'red'
-      // ctx.fillText('Pixel-Matrix', 0, 150)
       if (audioData.current) {
         const bufferSize = audioData.current.frequencyBinCount
         const WIDTH = canvas.width
@@ -197,8 +195,6 @@ function Content() {
       checkAudio(false)
       video.requestVideoFrameCallback(videoCB)
     }
-    // const endT = performance.now()
-    // console.log(`Total ctx vctx conv time: ${endT - startT} ms`);
   }
 
   return (
