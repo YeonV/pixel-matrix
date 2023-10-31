@@ -1,17 +1,27 @@
-import './App.css'
-import { useCallback, useRef, useState } from 'react'
-import { Button, Card, Divider, MenuItem, Stack, TextField, Typography } from '@mui/material'
-import { Cast, PlayArrow, Stop } from '@mui/icons-material'
-import DropFile from './components/DropFile'
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Button, Card, Divider, MenuItem, Stack, TextField, Typography } from '@mui/material';
+import { Cast, PlayArrow, Stop } from '@mui/icons-material';
+import DropFile from './components/DropFile';
+import AudioDataContainer from './AudioDataContainer';
 
 function Content() {
-  const [fft, setFft] = useState(256)
-  const [size, setSize] = useState(64)
-  const [ip, setIp] = useState('ws://192.168.10.50:81')
+  const [config, setConfig] = useState({
+    fft: 256,
+    size: 64,
+    ip: 'ws://192.168.10.50:81',
+    audioDevices: [] as MediaDeviceInfo[],
+    audioDevice: null as string | null,
+    videoDevice: 'screen',
+  });
 
-  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([])
-  const [audioDevice, setAudioDevice] = useState<null | string>()
-  const [videoDevice, setVideoDevice] = useState('screen')
+  const {
+    fft,
+    size,
+    ip,
+    audioDevices,
+    audioDevice,
+    videoDevice
+  } = config;
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -47,7 +57,7 @@ function Content() {
     }
   }, [ip])
 
-  const checkAudio = (log = false) => {
+  const checkAudio = useCallback((log = false) => {
     if (theStream.current && audioContext.current && !audioData.current && !theSource.current) {
       theSource.current = audioContext.current.createMediaStreamSource(theStream.current)
       theAnalyzer.current = audioContext.current.createAnalyser()
@@ -59,21 +69,18 @@ function Content() {
       audioData.current = theAnalyzer.current
       if (log) console.log('audioData', audioData.current)
     }
-  }
+  }, [fft])
+  
+  const handleStartCapture = async () => {
+    try {
+      const tempip = localStorage.getItem('ip') || 'ws://192.168.10.50:81';
+      setConfig({ ...config, ip: tempip });
 
-  const startCapture = async () => {
-    const tempip = localStorage.getItem('ip') || 'ws://192.168.10.50:81'
-    setIp(tempip)
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const ad = audioDevice !== null && devices.find((d) => d.deviceId === audioDevice) ? audioDevice : null;
 
-    
-    const ad = await navigator.mediaDevices.enumerateDevices().then((devices) => {
-      setAudioDevices(devices.filter((cd) => cd.kind === 'audioinput'))
-      return audioDevice !== null && devices.find((d) => d.deviceId === audioDevice) ? audioDevice : null
-    })
-
-    if (ad) {
-      console.log('Audio Device:', ad)
-      try {
+      if (ad) {
+        console.log('Audio Device:', ad)
         if (videoDevice === 'cam') {
           await navigator.mediaDevices.getUserMedia({
             audio: { deviceId: { exact: ad } },
@@ -93,11 +100,7 @@ function Content() {
             return stream
           })
         }
-      } catch (err) {
-        console.log('Error:', err)
-      }
-    } else {
-      try {
+      } else {
         if (videoDevice === 'cam') {
           await navigator.mediaDevices.getUserMedia({
             audio: true,
@@ -117,32 +120,33 @@ function Content() {
             return stream
           })
         }
-      } catch (err) {
-        console.log('Error:', err)
       }
-    }
 
-    if (vcanvas && video) {
-      checkAudio(true)
-    }
-    setTimeout(() => {
       if (vcanvas && video) {
-        vcanvas.width = video.videoWidth
-        vcanvas.height = video.videoHeight
-        video.srcObject = theStream.current
-        video.play()
-        video.requestVideoFrameCallback(videoCB)
+        checkAudio(true)
       }
-    }, 350)
-  }
-
-  const stopCapture = () => {
-    if (video) {
-      video.pause()
-      video.srcObject = null
-      theStream.current?.getTracks().forEach((track: any) => track.stop())
+      setTimeout(() => {
+        console.log(video)
+        if (vcanvas && video) {
+          vcanvas.width = video.videoWidth
+          vcanvas.height = video.videoHeight
+          video.srcObject = theStream.current
+          video.play()
+          video.requestVideoFrameCallback(videoCB)
+        }
+      }, 350)
+    } catch (error) {
+      console.error('Error:', error);
     }
-  }
+  };
+
+  const handleStopCapture = () => {
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+      theStream.current?.getTracks().forEach((track) => track.stop());
+    }
+  };
 
   const convertCanvas = async (ctx: CanvasRenderingContext2D, xres: number, yres: number) => {
     const imgData = ctx.getImageData(0, 0, xres, yres)
@@ -160,7 +164,6 @@ function Content() {
       socketRef.current?.send(buff)
     }
   }
-
   const videoCB = () => {
     if (video && vctx && ctx && canvas) {
       const w = (video.videoWidth / video.videoHeight) * canvas.height
@@ -190,21 +193,25 @@ function Content() {
           x += barWidth + 1
         }
       }
-
-      convertCanvas(ctx, canvas.width, canvas.height)
-      checkAudio(false)
-      video.requestVideoFrameCallback(videoCB)
     }
   }
+
+  useEffect(() => {
+    if (video && vctx && ctx && canvas) {
+      convertCanvas(ctx, canvas.width, canvas.height);
+      checkAudio(false);
+      video.requestVideoFrameCallback(videoCB);
+    }
+  }, [video, vctx, ctx, canvas, checkAudio, videoCB]);
 
   return (
     <Card sx={{ padding: 2 }}>
       <Stack spacing={2}>
         <Stack direction='row' spacing={2}>
-          <Button startIcon={<Cast />} onClick={startCapture}>
+          <Button startIcon={<Cast />} onClick={handleStartCapture}>
             Share
           </Button>
-          <Button startIcon={<Stop />} onClick={stopCapture}>
+          <Button startIcon={<Stop />} onClick={handleStopCapture}>
             Stop
           </Button>
         </Stack>
@@ -214,9 +221,7 @@ function Content() {
           label='Video Input'
           value={videoDevice}
           style={{ width: '100%', textAlign: 'left' }}
-          onChange={(e) => {
-            setVideoDevice(e.target.value)
-          }}
+          onChange={(e) => setConfig({ ...config, videoDevice: e.target.value })}
         >
           <MenuItem value={'screen'}>Screen</MenuItem>
           <MenuItem value={'cam'}>Cam</MenuItem>
@@ -228,9 +233,7 @@ function Content() {
           disabled={videoDevice === 'screen'}
           value={audioDevice || 'default'}
           style={{ width: '100%', textAlign: 'left' }}
-          onChange={(e) => {
-            setAudioDevice(e.target.value)
-          }}
+          onChange={(e) => setConfig({ ...config, audioDevice: e.target.value })}
         >
           {audioDevices
             .filter((cd) => cd.kind === 'audioinput')
@@ -240,30 +243,44 @@ function Content() {
               </MenuItem>
             ))}
         </TextField>
-        <TextField type='number' label='FFT' value={fft} onChange={(e) => setFft(parseInt(e.currentTarget.value))} />
-        <TextField type='number' label='size' value={size} onChange={(e) => setSize(parseInt(e.currentTarget.value))} />
-        <TextField label='IP' value={ip} onChange={(e) => setIp(e.currentTarget.value)} />
+        <TextField
+          type='number'
+          label='FFT'
+          value={fft}
+          onChange={(e) => setConfig({ ...config, fft: parseInt(e.currentTarget.value) })}
+        />
+        <TextField
+          type='number'
+          label='size'
+          value={size}
+          onChange={(e) => setConfig({ ...config, size: parseInt(e.currentTarget.value) })}
+        />
+        <TextField label='IP' value={ip} onChange={(e) => setConfig({ ...config, ip: e.currentTarget.value })} />
         <Button startIcon={<PlayArrow />} onClick={connect}>
           Connect
         </Button>
         <DropFile
           onload={(img: any) => {
-            if (!ctx || !canvas) return
-            ctx.clearRect(0, 0, canvas.width, canvas.height)
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-            convertCanvas(ctx, canvas.width, canvas.height)
+            if (!ctx || !canvas) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            convertCanvas(ctx, canvas.width, canvas.height);
           }}
         />
-        <video autoPlay muted hidden width={size + 'px'} height={size + 'px'} ref={videoRef}></video>
-        <canvas width={size + 'px'} height={size + 'px'} hidden ref={vcanvasRef}></canvas>
-        <canvas width={size + 'px'} height={size + 'px'} style={{ zoom: 1 }} ref={canvasRef}></canvas>
+        <video autoPlay muted hidden width={`${size}px`} height={`${size}px`} ref={videoRef}></video>
+        <canvas width={`${size}px`} height={`${size}px`} hidden ref={vcanvasRef}></canvas>
+        <canvas width={`${size}px`} height={`${size}px`} style={{ zoom: 1 }} ref={canvasRef}></canvas>
         <Divider />
         <Typography variant='caption'>LOGS</Typography>
         <Button onClick={() => checkAudio(true)}>AnalyserNode</Button>
-        <Button onClick={() => console.log('AudioDevices:', audioDevices, 'stream:', theStream)}>AudioDevices</Button>
+        <Button onClick={() => console.log('AudioDevices:', audioDevices, 'stream:', theStream)}>
+          AudioDevices
+        </Button>
       </Stack>
+      <AudioDataContainer videoDevice={videoDevice} audioDeviceId={audioDevice || 'default'} fft={fft} bandCount={size} audioContext={audioContext} audioData={audioData} theStream={theStream}/>
+
     </Card>
-  )
+  );
 }
 
-export default Content
+export default Content;
