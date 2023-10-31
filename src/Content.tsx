@@ -5,7 +5,8 @@ import { Cast, PlayArrow, Stop } from '@mui/icons-material'
 import DropFile from './components/DropFile'
 
 function Content() {
-  const fft = 1024
+  const [fft, setFft] = useState(1024)
+  const [size, setSize] = useState(64)
   const [ip, setIp] = useState('ws://192.168.10.50:81')
 
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([])
@@ -243,6 +244,8 @@ function Content() {
               </MenuItem>
             ))}
         </TextField>
+        <TextField type='number' label='FFT' value={fft} onChange={(e) => setFft(parseInt(e.currentTarget.value))} />
+        <TextField type='number' label='size' value={size} onChange={(e) => setSize(parseInt(e.currentTarget.value))} />
         <TextField label='IP' value={ip} onChange={(e) => setIp(e.currentTarget.value)} />
         <Button startIcon={<PlayArrow />} onClick={connect}>
           Connect
@@ -255,9 +258,9 @@ function Content() {
             convertCanvas(ctx, canvas.width, canvas.height)
           }}
         />
-        <video autoPlay muted hidden width='375px' height='375px' ref={videoRef}></video>
-        <canvas width='375px' height='375px' hidden ref={vcanvasRef}></canvas>
-        <canvas width='375px' height='375px' style={{ zoom: 1 }} ref={canvasRef}></canvas>
+        <video autoPlay muted hidden width={size + 'px'} height={size + 'px'} ref={videoRef}></video>
+        <canvas width={size + 'px'} height={size + 'px'} hidden ref={vcanvasRef}></canvas>
+        <canvas width={size + 'px'} height={size + 'px'} style={{ zoom: 1 }} ref={canvasRef}></canvas>
         <Divider />
         <Typography variant='caption'>LOGS</Typography>
         <Button onClick={() => checkAudio(true)}>AnalyserNode</Button>
